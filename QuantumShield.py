@@ -3,9 +3,9 @@ from tkinter import filedialog, messagebox
 from tkinter import ttk, simpledialog
 import os
 import threading
-import hashlib
 import webbrowser  # Added for clickable links
 from kyber import Kyber512
+from argon2 import PasswordHasher
 
 class QuantumShield:
     def __init__(self):
@@ -17,6 +17,7 @@ class QuantumShield:
         # Stop event and thread management
         self.stop_event = threading.Event()
         self.active_thread = None
+        self.password_hasher = PasswordHasher()
 
         # Styling
         style = ttk.Style()
@@ -68,7 +69,6 @@ class QuantumShield:
         self.about_button = ttk.Button(action_frame, text="About", command=self.show_about)
         self.about_button.grid(row=0, column=4, padx=5, pady=5, sticky="ew")
         
-        # Adjust column weights for consistent button spacing
         for i in range(5):
             action_frame.columnconfigure(i, weight=1)
 
@@ -87,16 +87,14 @@ class QuantumShield:
         self.output_entry.insert(0, directory_path)
 
     def stop_process(self):
-        """Stops the current encryption/decryption process and terminates the thread."""
         if self.active_thread and self.active_thread.is_alive():
             self.stop_event.set()
             self.active_thread.join(timeout=2)
-            self.active_thread = None  # Clean up the thread reference
+            self.active_thread = None
         self.status_bar.config(text="Process stopped.")
 
     def generate_key(self):
         try:
-            # Generate a key pair
             public_key, private_key = Kyber512.keygen()
             with open("public_key.key", "wb") as pub_file:
                 pub_file.write(public_key)
@@ -108,71 +106,42 @@ class QuantumShield:
             self.status_bar.config(text=f"Error: {str(e)}")
             
     def show_about(self):
-        """Displays information about the tool with a clickable GitHub link."""
         about_window = tk.Toplevel(self.root)
         about_window.title("About QuantumShield")
         about_window.geometry("430x330")
         about_window.resizable(False, False)
 
-        tk.Label(
-            about_window, 
-            text="QuantumShield - Quantum-Resistant Encryption Tool",
-            font=("Segoe UI", 12, "bold")
-        ).pack(pady=(10, 5))
+        tk.Label(about_window, text="QuantumShield - Quantum-Resistant Encryption Tool", font=("Segoe UI", 12, "bold")).pack(pady=(10, 5))
+        tk.Label(about_window, text="Version: 1.0.0\nAuthor: Xeloria", font=("Segoe UI", 10)).pack(pady=(5, 0))
 
-        tk.Label(
-            about_window,
-            text="Version: 1.0.0\nAuthor: Xeloria",
-            font=("Segoe UI", 10)
-        ).pack(pady=(5, 0))
-
-        # Create a clickable link
-        github_label = tk.Label(
-            about_window, 
-            text="GitHub: https://github.com/xeloria", 
-            font=("Segoe UI", 10, "italic"), 
-            fg="blue", 
-            cursor="hand2"
-        )
+        github_label = tk.Label(about_window, text="GitHub: https://github.com/xeloria", font=("Segoe UI", 10, "italic"), fg="blue", cursor="hand2")
         github_label.pack(pady=(5, 10))
-        
-        # Bind the label to open the link in a browser
         github_label.bind("<Button-1>", lambda e: webbrowser.open("https://github.com/xeloria"))
 
-        tk.Label(
-            about_window,
-            text=(
-                "Purpose: Encrypt and decrypt files using quantum-resistant cryptography.\n\n"
-                "Usage:\n"
-                "- Generate Keys: Create public and private keys.\n"
-                "- Encrypt: Secure your file with the public key.\n"
-                "- Decrypt: Use the private key to retrieve your file.\n\n"
-                "Disclaimer: Ensure keys and passwords are stored securely. Improper use may lead to data loss."
-            ),
-            font=("Segoe UI", 10),
-            wraplength=350,  # Ensures text wraps neatly in the window
-            justify="left"
-        ).pack(pady=(5, 10))
-
-    def initialize_progress(self, total_chunks):
-        """Reusable method to create and return a progress bar."""
-        progress = ttk.Progressbar(self.main_frame, orient="horizontal", length=400, mode="determinate")
-        progress.pack(pady=10)
-        progress["maximum"] = total_chunks
-        return progress
+        tk.Label(about_window, text=(
+            "Purpose: Encrypt and decrypt files using quantum-resistant cryptography.\n\n"
+            "Usage:\n"
+            "- Generate Keys: Create public and private keys.\n"
+            "- Encrypt: Secure your file with the public key.\n"
+            "- Decrypt: Use the private key to retrieve your file.\n\n"
+            "Disclaimer: Ensure keys and passwords are stored securely. Improper use may lead to data loss."
+        ), font=("Segoe UI", 10), wraplength=350, justify="left").pack(pady=(5, 10))
 
     def prompt_password(self, callback):
-        """Prompt for a password and ensure it runs on the main thread."""
         def ask():
-            password = simpledialog.askstring("Password", "Enter a password for encryption/decryption:", show="*")
-            if password:
-                callback(hashlib.sha256(password.encode()).digest())
-            else:
+            try:
+                password = simpledialog.askstring("Password", "Enter a password for encryption/decryption:", show="*")
+                if password:
+                    hashed_password = self.password_hasher.hash(password)
+                    callback(hashed_password)
+                else:
+                    callback(None)
+            except Exception as e:
+                self.status_bar.config(text=f"Error: {str(e)}")
                 callback(None)
         self.root.after(0, ask)
 
     def start_thread(self, target_function, *args):
-        """Start a new thread for encryption or decryption."""
         self.active_thread = threading.Thread(target=target_function, args=args, daemon=True)
         self.active_thread.start()
 
@@ -191,7 +160,6 @@ class QuantumShield:
                     self.status_bar.config(text="Invalid input file.")
                     return
                 
-                # If output location is empty, use the input file directory
                 if not output_directory_path.strip():
                     output_directory_path = os.path.dirname(input_file_path)
 
@@ -201,7 +169,7 @@ class QuantumShield:
                 with open("public_key.key", "rb") as pub_file:
                     public_key = pub_file.read()
                 ciphertext, shared_secret = Kyber512.enc(public_key)
-                combined_secret = bytes(a ^ b for a, b in zip(shared_secret, password_hash))
+                combined_secret = bytes(a ^ b for a, b in zip(shared_secret, password_hash.encode('utf-8')))
 
                 with open("key_ciphertext.bin", "wb") as ct_file:
                     ct_file.write(ciphertext)
@@ -261,7 +229,6 @@ class QuantumShield:
                     self.status_bar.config(text="Invalid input file.")
                     return
                 
-                # If output location is empty, use the input file directory
                 if not output_directory_path.strip():
                     output_directory_path = os.path.dirname(input_file_path)
 
@@ -270,7 +237,7 @@ class QuantumShield:
                 with open("key_ciphertext.bin", "rb") as ct_file:
                     ciphertext = ct_file.read()
                 shared_secret = Kyber512.dec(ciphertext, private_key)
-                combined_secret = bytes(a ^ b for a, b in zip(shared_secret, password_hash))
+                combined_secret = bytes(a ^ b for a, b in zip(shared_secret, password_hash.encode('utf-8')))
 
                 with open(input_file_path, "rb") as input_file:
                     metadata_length = int.from_bytes(input_file.read(4), byteorder="big")
@@ -317,6 +284,12 @@ class QuantumShield:
                 self.status_bar.config(text=f"Error: {str(e)}")
 
         self.prompt_password(lambda password_hash: self.start_thread(perform_decryption, password_hash))
+
+    def initialize_progress(self, total_chunks):
+        progress = ttk.Progressbar(self.main_frame, orient="horizontal", length=400, mode="determinate")
+        progress.pack(pady=10)
+        progress["maximum"] = total_chunks
+        return progress
 
     def run(self):
         self.root.mainloop()
