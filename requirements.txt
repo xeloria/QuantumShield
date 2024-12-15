@@ -1,0 +1,7 @@
+
+tkinter
+hashlib
+threading
+os
+webbrowser
+kyber-py  # Specific quantum-resistant cryptography library
